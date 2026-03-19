@@ -8,9 +8,11 @@ This project is designed to run locally and reads local Codex CLI session logs.
 - Avoid binding to `0.0.0.0` or opening the port to your LAN/public Internet.
 
 The dashboard can display:
-- Local filesystem paths (`cwd`)
 - Model names
 - Token usage and estimated costs
+- Anonymized workspace labels in the UI
+
+Raw local Codex logs on disk may still contain original paths and other sensitive metadata.
 
 ## Sensitive files to never commit
 

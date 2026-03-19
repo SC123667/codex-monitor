@@ -13,7 +13,11 @@ This tool reads Codex CLI local session logs from `~/.codex/sessions/**.jsonl` o
 
 - It does not send your data to third parties.
 - It does not require network access.
+- It does not expose a public endpoint by default.
 
-## Sharing screenshots / JSON exports
+## UI and export behavior
 
-Be careful: exports and screenshots may include local paths (`cwd`) and other identifying information.
+- The dashboard is designed to run locally and bind to `127.0.0.1` by default.
+- Workspace displays are anonymized in the UI so screenshots are safer to share.
+- Raw local logs still contain original metadata on your machine.
+- If you add your own custom exports or patches, review them before sharing publicly.

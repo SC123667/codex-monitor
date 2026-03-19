@@ -50,9 +50,10 @@ def print_summary(data: Dict[str, Any]):
 
     print("🤖 Codex Code Monitor（本地日志统计）")
     print(f"生成时间: {data.get('generated_at')}")
-    print(f"日志目录: {source.get('sessions_dir')}  (文件数: {source.get('files')})")
+    print(f"日志来源: {source.get('label', '本地 Codex 会话流')}  (文件数: {source.get('files')})")
+    print(f"统计范围: {source.get('scope', '全局工作区')}")
     if source.get("cwd_filter"):
-        print(f"过滤目录: {source.get('cwd_filter')}")
+        print("过滤状态: 已启用工作区过滤")
 
     _print_section("总计")
     print(f"调用次数: {_fmt_int(total.get('calls', 0))}")
@@ -135,4 +136,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

@@ -9,11 +9,12 @@ This project is a **local-only** dashboard that parses Codex CLI session logs fr
 ## Development setup
 
 Requirements:
-- Python 3.9+ (3.12 recommended)
+- Python 3.10+ (3.12 recommended)
 
 Run locally:
 ```bash
-python3 monitor.py
+python3 -m pip install -r requirements.txt
+python3 monitor.py open --no-browser
 ```
 
 Front-end is embedded in `web_dashboard.py` (no Node.js toolchain).
@@ -44,7 +45,7 @@ Front-end is embedded in `web_dashboard.py` (no Node.js toolchain).
 
 At minimum:
 ```bash
-python3 -m py_compile monitor.py web_dashboard.py codex_monitor_core.py
+python3 -m compileall monitor.py web_dashboard.py codex_monitor_core.py
 ```
 
 If you touch parsing logic, verify against a real `~/.codex/sessions` folder (locally).

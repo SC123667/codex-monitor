@@ -68,6 +68,21 @@ def default_config_path() -> Path:
     return Path.home() / ".codex" / "monitor_config.json"
 
 
+def _workspace_label(index: int) -> str:
+    return f"工作区 {index:02d}"
+
+
+def _build_workspace_aliases(events: List["UsageEvent"]) -> Dict[str, str]:
+    raw_paths = sorted({str(event.cwd) for event in events if isinstance(event.cwd, str) and event.cwd.strip()})
+    return {raw_path: _workspace_label(i + 1) for i, raw_path in enumerate(raw_paths)}
+
+
+def _display_cwd(raw_cwd: Optional[str], aliases: Dict[str, str]) -> str:
+    if isinstance(raw_cwd, str) and raw_cwd.strip():
+        return aliases.get(raw_cwd, "工作区")
+    return "未标记工作区"
+
+
 @dataclass(frozen=True)
 class PricingRatesPerMillion:
     input: float
@@ -83,10 +98,17 @@ class PricingRatesPerMillion:
         )
 
 
-# 内置 OpenAI 官方定价（来源：openai.com/api/pricing）
+# 内置 OpenAI 官方定价（来源：https://developers.openai.com/api/docs/pricing，核对日期：2026-03-18）
 # 说明：默认内置为 Text tokens 的 Standard tier（USD / 1M tokens）。
+# 对 gpt-5.4 / gpt-5.4-pro，会额外处理官方 long context (>272K input tokens) 加价规则。
 # Codex CLI 的 model id 可能为别名，会通过 alias/规则映射到这些定价键。
 BUILTIN_PRICING_PER_MILLION = {
+    # GPT-5.4.x
+    "gpt-5.4": PricingRatesPerMillion(input=2.5, cached_input=0.25, output=15.0),
+    "gpt-5.4-pro": PricingRatesPerMillion(input=30.0, cached_input=30.0, output=180.0),
+    "gpt-5.4-mini": PricingRatesPerMillion(input=0.75, cached_input=0.075, output=4.5),
+    "gpt-5.4-nano": PricingRatesPerMillion(input=0.2, cached_input=0.02, output=1.25),
+    "gpt-5.4-chat-latest": PricingRatesPerMillion(input=2.5, cached_input=0.25, output=15.0),
     # GPT-5.x
     "gpt-5.2": PricingRatesPerMillion(input=1.75, cached_input=0.175, output=14.0),
     "gpt-5.1": PricingRatesPerMillion(input=1.25, cached_input=0.125, output=10.0),
@@ -113,10 +135,12 @@ BUILTIN_PRICING_PER_MILLION = {
     "gpt-4o-mini": PricingRatesPerMillion(input=0.15, cached_input=0.075, output=0.6),
     # Realtime / Audio
     "gpt-realtime": PricingRatesPerMillion(input=4.0, cached_input=0.4, output=16.0),
-    "gpt-realtime-mini": PricingRatesPerMillion(input=0.6, cached_input=0.06, output=2.4),
+    "gpt-realtime-1.5": PricingRatesPerMillion(input=32.0, cached_input=0.4, output=64.0),
+    "gpt-realtime-mini": PricingRatesPerMillion(input=10.0, cached_input=0.3, output=20.0),
     "gpt-4o-realtime-preview": PricingRatesPerMillion(input=5.0, cached_input=2.5, output=20.0),
     "gpt-4o-mini-realtime-preview": PricingRatesPerMillion(input=0.6, cached_input=0.3, output=2.4),
     "gpt-audio": PricingRatesPerMillion(input=2.5, cached_input=2.5, output=10.0),
+    "gpt-audio-1.5": PricingRatesPerMillion(input=32.0, cached_input=32.0, output=64.0),
     "gpt-audio-mini": PricingRatesPerMillion(input=0.6, cached_input=0.6, output=2.4),
     "gpt-4o-audio-preview": PricingRatesPerMillion(input=2.5, cached_input=2.5, output=10.0),
     "gpt-4o-mini-audio-preview": PricingRatesPerMillion(input=0.15, cached_input=0.15, output=0.6),
@@ -137,11 +161,17 @@ BUILTIN_PRICING_PER_MILLION = {
     "computer-use-preview": PricingRatesPerMillion(input=3.0, cached_input=3.0, output=12.0),
     # Image (text tokens only; output 为 '-' 表示不按 text output token 计费)
     "gpt-image-1": PricingRatesPerMillion(input=5.0, cached_input=1.25, output=0.0),
-    "gpt-image-1-mini": PricingRatesPerMillion(input=2.0, cached_input=0.2, output=0.0),
+    "gpt-image-1.5": PricingRatesPerMillion(input=8.0, cached_input=2.0, output=32.0),
+    "gpt-image-1-mini": PricingRatesPerMillion(input=2.5, cached_input=0.25, output=8.0),
 }
 
 BUILTIN_MODEL_ALIASES = {
     # Codex CLI 常见别名
+    "gpt-5.4-codex": "gpt-5.4",
+    "gpt-5.4-codex-mini": "gpt-5.4-mini",
+    "gpt-5.4-codex-nano": "gpt-5.4-nano",
+    "gpt-5.4-codex-pro": "gpt-5.4-pro",
+    "gpt-5.4-max": "gpt-5.4",
     "gpt-5.1-codex-max": "gpt-5.1",
     "gpt-5.1-codex": "gpt-5.1",
     "gpt-5.1-codex-mini": "gpt-5-mini",
@@ -226,6 +256,16 @@ def canonicalize_model_id(model: str) -> Optional[str]:
 
     m = str(model).strip().lower()
 
+    # GPT-5.4.x
+    if m.startswith("gpt-5.4"):
+        if "pro" in m:
+            return "gpt-5.4-pro"
+        if "mini" in m:
+            return "gpt-5.4-mini"
+        if "nano" in m:
+            return "gpt-5.4-nano"
+        return "gpt-5.4"
+
     # GPT-5.x
     if m.startswith("gpt-5") and "mini" in m:
         return "gpt-5-mini"
@@ -242,13 +282,39 @@ def canonicalize_model_id(model: str) -> Optional[str]:
 
     # Codex / Max 等：尽量按版本归一（可在 model_aliases 覆盖）
     if m.startswith("gpt-5") and ("codex" in m or "max" in m):
+        if "5.4" in m:
+            if "pro" in m:
+                return "gpt-5.4-pro"
+            if "mini" in m:
+                return "gpt-5.4-mini"
+            if "nano" in m:
+                return "gpt-5.4-nano"
+            return "gpt-5.4"
         if "5.2" in m:
             return "gpt-5.2"
         if "5.1" in m:
             return "gpt-5.1"
         return "gpt-5"
 
-    return None
+
+def _apply_long_context_pricing(
+    model: str,
+    input_total: int,
+    rates: PricingRatesPerMillion,
+    source: str,
+) -> Tuple[PricingRatesPerMillion, str]:
+    canonical = canonicalize_model_id(model) or model.strip().lower()
+    if canonical not in {"gpt-5.4", "gpt-5.4-pro"}:
+        return rates, source
+    if input_total <= 272_000:
+        return rates, source
+
+    adjusted = PricingRatesPerMillion(
+        input=rates.input * 2.0,
+        cached_input=rates.cached_input * 2.0,
+        output=rates.output * 1.5,
+    )
+    return adjusted, f"{source}+long-context"
 
 
 @dataclass
@@ -281,6 +347,9 @@ class UsageDelta:
 
 @dataclass
 class RateLimitSnapshot:
+    limit_id: Optional[str] = None
+    limit_name: Optional[str] = None
+    observed_at: Optional[datetime] = None
     used_percent: Optional[float] = None
     window_minutes: Optional[int] = None
     resets_at: Optional[datetime] = None
@@ -310,11 +379,90 @@ class RateLimitSnapshot:
             resets_at_dt = timestamp_local + timedelta(seconds=resets_in_seconds)
 
         return RateLimitSnapshot(
+            limit_id=str(rate_limits.get("limit_id")) if rate_limits.get("limit_id") is not None else None,
+            limit_name=str(rate_limits.get("limit_name")) if rate_limits.get("limit_name") is not None else None,
+            observed_at=timestamp_local,
             used_percent=_safe_float(used_percent, None) if used_percent is not None else None,
             window_minutes=_safe_int(window_minutes, None) if window_minutes is not None else None,
             resets_at=resets_at_dt,
             resets_in_seconds=resets_in_seconds if resets_in_seconds and resets_in_seconds > 0 else None,
         )
+
+
+def _should_replace_rate_limit(existing: Optional[RateLimitSnapshot], candidate: RateLimitSnapshot) -> bool:
+    if existing is None:
+        return True
+
+    existing_scope_rank = 1 if (existing.limit_id or "").strip().lower() == "codex" else 0
+    candidate_scope_rank = 1 if (candidate.limit_id or "").strip().lower() == "codex" else 0
+    if candidate_scope_rank != existing_scope_rank:
+        return candidate_scope_rank > existing_scope_rank
+
+    existing_reset = existing.resets_at or datetime.min
+    candidate_reset = candidate.resets_at or datetime.min
+    if existing.limit_id == candidate.limit_id and candidate_reset != existing_reset:
+        return candidate_reset > existing_reset
+
+    existing_reset = existing.resets_at or datetime.min
+    candidate_reset = candidate.resets_at or datetime.min
+    if candidate_reset != existing_reset and existing_scope_rank == candidate_scope_rank:
+        return candidate_reset > existing_reset
+
+    existing_used = float(existing.used_percent) if existing.used_percent is not None else -1.0
+    candidate_used = float(candidate.used_percent) if candidate.used_percent is not None else -1.0
+    if candidate_used != existing_used:
+        return candidate_used > existing_used
+
+    existing_observed = existing.observed_at or datetime.min
+    candidate_observed = candidate.observed_at or datetime.min
+    if candidate_observed != existing_observed:
+        return candidate_observed > existing_observed
+
+    if candidate.resets_at is not None and existing.resets_at is None:
+        return True
+    return False
+
+
+def _rate_limit_scope(snapshot: RateLimitSnapshot) -> str:
+    if snapshot.limit_id == "codex" or not snapshot.limit_name:
+        return "global"
+    return "model"
+
+
+def _rate_limit_payload(snapshot: RateLimitSnapshot, current_time: datetime) -> Dict[str, Any]:
+    remaining_seconds = None
+    if snapshot.resets_at is not None:
+        remaining_seconds = max(0, int((snapshot.resets_at - current_time).total_seconds()))
+    elif snapshot.resets_in_seconds is not None:
+        remaining_seconds = max(0, int(snapshot.resets_in_seconds))
+
+    return {
+        "limit_id": snapshot.limit_id,
+        "limit_name": snapshot.limit_name,
+        "used_percent": snapshot.used_percent,
+        "window_minutes": snapshot.window_minutes,
+        "resets_at": snapshot.resets_at.isoformat(sep=" ", timespec="seconds") if snapshot.resets_at else None,
+        "remaining_seconds": remaining_seconds,
+        "observed_at": snapshot.observed_at.isoformat(sep=" ", timespec="seconds") if snapshot.observed_at else None,
+        "scope": _rate_limit_scope(snapshot),
+    }
+
+
+def _floor_to_bucket(dt: datetime, minutes: int) -> datetime:
+    bucket = max(1, int(minutes))
+    floored_minute = (dt.minute // bucket) * bucket
+    return dt.replace(minute=floored_minute, second=0, microsecond=0)
+
+
+def _safe_ratio(numerator: Any, denominator: Any, digits: int = 4) -> float:
+    try:
+        numerator_f = float(numerator)
+        denominator_f = float(denominator)
+        if denominator_f <= 0:
+            return 0.0
+        return round(numerator_f / denominator_f, digits)
+    except Exception:
+        return 0.0
 
 
 @dataclass
@@ -348,6 +496,7 @@ def estimate_cost_usd(model: str, delta: UsageDelta, config: MonitorConfig) -> T
     input_total = max(0, delta.input_tokens)
     uncached = max(0, input_total - cached)
     output = max(0, delta.output_tokens)
+    rates, source = _apply_long_context_pricing(model, input_total, rates, source)
 
     cost = 0.0
     cost += uncached * rates.input / 1_000_000
@@ -371,7 +520,7 @@ def parse_usage_events_from_session_file(
     cwd_filter: Optional[str] = None,
 ) -> Tuple[List[UsageEvent], Optional[RateLimitSnapshot]]:
     events: List[UsageEvent] = []
-    latest_rl: Optional[RateLimitSnapshot] = None
+    rate_limit_snapshots: Dict[str, RateLimitSnapshot] = {}
 
     current_model: str = "unknown"
     current_cwd: Optional[str] = None
@@ -428,9 +577,10 @@ def parse_usage_events_from_session_file(
                 rl = payload.get("rate_limits")
                 if isinstance(rl, dict):
                     snapshot = RateLimitSnapshot.from_payload(ts_local, rl)
-                    # 以时间为准保留最新的
-                    if latest_rl is None or (snapshot.resets_at and latest_rl.resets_at and snapshot.resets_at >= latest_rl.resets_at) or ts_local >= (latest_rl.resets_at or datetime.min):
-                        latest_rl = snapshot
+                    snapshot_key = snapshot.limit_id or "global"
+                    current_snapshot = rate_limit_snapshots.get(snapshot_key)
+                    if _should_replace_rate_limit(current_snapshot, snapshot):
+                        rate_limit_snapshots[snapshot_key] = snapshot
 
                 info = payload.get("info")
                 if not isinstance(info, dict):
@@ -468,9 +618,38 @@ def parse_usage_events_from_session_file(
         return [], None
     except Exception:
         # 单个文件坏了不影响整体
-        return events, latest_rl
+        primary_snapshot = None
+        if "codex" in rate_limit_snapshots:
+            primary_snapshot = rate_limit_snapshots["codex"]
+        elif rate_limit_snapshots:
+            ranked = sorted(
+                rate_limit_snapshots.values(),
+                key=lambda snapshot: (
+                    1 if _rate_limit_scope(snapshot) == "global" else 0,
+                    snapshot.used_percent or 0.0,
+                    snapshot.observed_at or datetime.min,
+                ),
+                reverse=True,
+            )
+            primary_snapshot = ranked[0]
+        return events, primary_snapshot
 
-    return events, latest_rl
+    primary_snapshot = None
+    if "codex" in rate_limit_snapshots:
+        primary_snapshot = rate_limit_snapshots["codex"]
+    elif rate_limit_snapshots:
+        ranked = sorted(
+            rate_limit_snapshots.values(),
+            key=lambda snapshot: (
+                1 if _rate_limit_scope(snapshot) == "global" else 0,
+                snapshot.used_percent or 0.0,
+                snapshot.observed_at or datetime.min,
+            ),
+            reverse=True,
+        )
+        primary_snapshot = ranked[0]
+
+    return events, primary_snapshot
 
 
 def build_usage_summary(
@@ -493,23 +672,25 @@ def build_usage_summary(
 
     current_time = now or datetime.now()
     five_hours_ago = current_time - timedelta(hours=5)
+    fifteen_minutes_ago = current_time - timedelta(minutes=15)
+    sixty_minutes_ago = current_time - timedelta(minutes=60)
     week_start = (current_time - timedelta(days=current_time.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+    five_hour_slot_minutes = 5
 
     all_events: List[UsageEvent] = []
-    latest_rl: Optional[RateLimitSnapshot] = None
+    rate_limit_snapshots: Dict[str, RateLimitSnapshot] = {}
 
     for file_path in iter_session_files(sessions):
         events, rl = parse_usage_events_from_session_file(file_path, cfg, cwd_filter=cwd_filter)
         all_events.extend(events)
         if rl is not None:
-            if latest_rl is None:
-                latest_rl = rl
-            else:
-                # 按 resets_at 优先，其次保留较新的
-                if rl.resets_at and (not latest_rl.resets_at or rl.resets_at > latest_rl.resets_at):
-                    latest_rl = rl
+            rate_limit_key = rl.limit_id or "global"
+            current = rate_limit_snapshots.get(rate_limit_key)
+            if _should_replace_rate_limit(current, rl):
+                rate_limit_snapshots[rate_limit_key] = rl
 
     all_events.sort(key=lambda e: e.timestamp)
+    workspace_aliases = _build_workspace_aliases(all_events)
 
     def empty_stats() -> Dict[str, Any]:
         return {
@@ -530,11 +711,14 @@ def build_usage_summary(
 
     five_hour = empty_stats()
     five_hour_by_hour: Dict[str, Dict[str, Any]] = {}
+    five_hour_by_slot: Dict[str, Dict[str, Any]] = {}
     five_hour_by_model: Dict[str, Dict[str, Any]] = {}
 
     this_week = empty_stats()
     this_week_by_date: Dict[str, Dict[str, Any]] = {}
     this_week_by_model: Dict[str, Dict[str, Any]] = {}
+    recent_15m = empty_stats()
+    recent_60m = empty_stats()
 
     for event in all_events:
         delta = event.delta
@@ -565,7 +749,7 @@ def build_usage_summary(
             by_hour[hour_key] = empty_stats()
         apply(by_hour[hour_key])
 
-        cwd_key = event.cwd or "unknown"
+        cwd_key = _display_cwd(event.cwd, workspace_aliases)
         if cwd_key not in by_cwd:
             by_cwd[cwd_key] = empty_stats()
         apply(by_cwd[cwd_key])
@@ -576,9 +760,20 @@ def build_usage_summary(
                 five_hour_by_hour[hour_key] = empty_stats()
             apply(five_hour_by_hour[hour_key])
 
+            slot_key = _floor_to_bucket(event.timestamp, five_hour_slot_minutes).strftime("%Y-%m-%d %H:%M")
+            if slot_key not in five_hour_by_slot:
+                five_hour_by_slot[slot_key] = empty_stats()
+            apply(five_hour_by_slot[slot_key])
+
             if model_key not in five_hour_by_model:
                 five_hour_by_model[model_key] = empty_stats()
             apply(five_hour_by_model[model_key])
+
+        if event.timestamp >= fifteen_minutes_ago:
+            apply(recent_15m)
+
+        if event.timestamp >= sixty_minutes_ago:
+            apply(recent_60m)
 
         if event.timestamp >= week_start:
             apply(this_week)
@@ -600,6 +795,14 @@ def build_usage_summary(
             five_hour_by_hour[k] = empty_stats()
         t += timedelta(hours=1)
 
+    slot_t = _floor_to_bucket(five_hours_ago, five_hour_slot_minutes)
+    slot_end = _floor_to_bucket(current_time, five_hour_slot_minutes)
+    while slot_t <= slot_end:
+        k = slot_t.strftime("%Y-%m-%d %H:%M")
+        if k not in five_hour_by_slot:
+            five_hour_by_slot[k] = empty_stats()
+        slot_t += timedelta(minutes=five_hour_slot_minutes)
+
     d = week_start.date()
     end_d = current_time.date()
     while d <= end_d:
@@ -613,7 +816,7 @@ def build_usage_summary(
         {
             "timestamp": e.timestamp.isoformat(sep=" ", timespec="seconds"),
             "model": e.model,
-            "cwd": e.cwd,
+            "cwd": _display_cwd(e.cwd, workspace_aliases),
             "total_tokens": e.delta.total_tokens,
             "input_tokens": e.delta.input_tokens,
             "cached_input_tokens": e.delta.cached_input_tokens,
@@ -667,7 +870,13 @@ def build_usage_summary(
 
     windows = {
         "last_5_hours": {
+            "range": {
+                "start": five_hours_ago.isoformat(sep=" ", timespec="seconds"),
+                "end": current_time.isoformat(sep=" ", timespec="seconds"),
+                "bucket_minutes": five_hour_slot_minutes,
+            },
             "total": five_hour,
+            "by_slot": _series_rows(five_hour_by_slot, "slot"),
             "by_hour": _series_rows(five_hour_by_hour, "hour"),
             "by_model": _top_rows(five_hour_by_model, "model", 15),
         },
@@ -683,27 +892,126 @@ def build_usage_summary(
     }
 
     rate_limits = None
-    if latest_rl is not None:
-        remaining_seconds = None
-        if latest_rl.resets_at is not None:
-            remaining_seconds = max(0, int((latest_rl.resets_at - current_time).total_seconds()))
-        elif latest_rl.resets_in_seconds is not None:
-            remaining_seconds = max(0, int(latest_rl.resets_in_seconds))
+    primary_rl: Optional[RateLimitSnapshot] = None
+    if rate_limit_snapshots:
+        if "codex" in rate_limit_snapshots:
+            primary_rl = rate_limit_snapshots["codex"]
+        else:
+            ranked = sorted(
+                rate_limit_snapshots.values(),
+                key=lambda snapshot: (
+                    1 if _rate_limit_scope(snapshot) == "global" else 0,
+                    snapshot.window_minutes or 0,
+                    snapshot.resets_at or datetime.min,
+                    snapshot.used_percent or 0.0,
+                    snapshot.observed_at or datetime.min,
+                ),
+                reverse=True,
+            )
+            primary_rl = ranked[0] if ranked else None
 
         rate_limits = {
-            "primary": {
-                "used_percent": latest_rl.used_percent,
-                "window_minutes": latest_rl.window_minutes,
-                "resets_at": latest_rl.resets_at.isoformat(sep=" ", timespec="seconds") if latest_rl.resets_at else None,
-                "remaining_seconds": remaining_seconds,
-            }
+            "primary": _rate_limit_payload(primary_rl, current_time) if primary_rl is not None else None,
+            "limits": [
+                _rate_limit_payload(snapshot, current_time)
+                for snapshot in sorted(
+                    rate_limit_snapshots.values(),
+                    key=lambda snapshot: (
+                        snapshot.resets_at or datetime.min,
+                        snapshot.used_percent or 0.0,
+                        snapshot.observed_at or datetime.min,
+                    ),
+                    reverse=True,
+                )
+            ],
         }
+
+    active_slots = sum(1 for st in five_hour_by_slot.values() if int(st.get("total_tokens", 0)) > 0)
+    last_event = all_events[-1] if all_events else None
+    five_hour_models_active = sum(1 for st in five_hour_by_model.values() if int(st.get("total_tokens", 0)) > 0)
+    five_hour_cwds_active = len({(event.cwd or "unknown") for event in all_events if event.timestamp >= five_hours_ago})
+
+    tokens_per_minute_5h = round(float(five_hour.get("total_tokens", 0)) / 300.0, 2)
+    tokens_per_minute_15m = round(float(recent_15m.get("total_tokens", 0)) / 15.0, 2)
+    calls_per_minute_5h = round(float(five_hour.get("calls", 0)) / 300.0, 3)
+    calls_per_minute_15m = round(float(recent_15m.get("calls", 0)) / 15.0, 3)
+    cost_per_hour_5h = round(float(five_hour.get("estimated_cost_usd", 0.0)) / 5.0, 6)
+    cache_hit_ratio_5h = _safe_ratio(five_hour.get("cached_input_tokens", 0), five_hour.get("input_tokens", 0))
+    output_ratio_5h = _safe_ratio(five_hour.get("output_tokens", 0), five_hour.get("input_tokens", 0))
+    avg_tokens_per_event_5h = _safe_ratio(five_hour.get("total_tokens", 0), five_hour.get("calls", 0), 2)
+    spike_ratio = _safe_ratio(tokens_per_minute_15m, tokens_per_minute_5h, 2) if tokens_per_minute_5h > 0 else 0.0
+
+    anomaly_level = "normal"
+    if spike_ratio >= 2.0:
+        anomaly_level = "high"
+    elif spike_ratio >= 1.25:
+        anomaly_level = "elevated"
+
+    projected_exhaustion_seconds: Optional[int] = None
+    official_window_used_percent: Optional[float] = None
+    official_window_observed_at: Optional[str] = None
+    if rate_limits and isinstance(rate_limits.get("primary"), dict):
+        primary_rl = rate_limits["primary"]
+        used_percent = primary_rl.get("used_percent")
+        window_minutes = primary_rl.get("window_minutes")
+        remaining_seconds = primary_rl.get("remaining_seconds")
+        if used_percent is not None and int(window_minutes or 0) == 300:
+            official_window_used_percent = float(used_percent)
+        official_window_observed_at = primary_rl.get("observed_at")
+        if used_percent is not None and window_minutes and remaining_seconds is not None:
+            used_fraction = max(0.0, min(1.0, float(used_percent) / 100.0))
+            total_window_seconds = int(window_minutes) * 60
+            elapsed_seconds = max(0, total_window_seconds - int(remaining_seconds))
+            if used_fraction > 0 and elapsed_seconds > 0:
+                pace_per_second = used_fraction / float(elapsed_seconds)
+                if pace_per_second > 0:
+                    projected_exhaustion_seconds = max(0, int((1.0 - used_fraction) / pace_per_second))
+
+    metrics = {
+        "window_slot_minutes": five_hour_slot_minutes,
+        "bucket_minutes_5h": five_hour_slot_minutes,
+        "tokens_per_minute_5h": tokens_per_minute_5h,
+        "tokens_per_min_5h": tokens_per_minute_5h,
+        "tokens_per_minute_15m": tokens_per_minute_15m,
+        "calls_per_minute_5h": calls_per_minute_5h,
+        "calls_per_minute_15m": calls_per_minute_15m,
+        "cost_per_hour_5h": cost_per_hour_5h,
+        "cost_per_hour": cost_per_hour_5h,
+        "cache_hit_ratio_5h": cache_hit_ratio_5h,
+        "cache_hit_ratio": cache_hit_ratio_5h,
+        "output_ratio_5h": output_ratio_5h,
+        "output_ratio": output_ratio_5h,
+        "avg_tokens_per_event_5h": avg_tokens_per_event_5h,
+        "active_models_5h": five_hour_models_active,
+        "active_models": five_hour_models_active,
+        "active_cwds_5h": five_hour_cwds_active,
+        "active_cwds": five_hour_cwds_active,
+        "active_slots_5h": active_slots,
+        "active_slot_ratio_5h": _safe_ratio(active_slots, len(five_hour_by_slot)),
+        "spike_ratio_15m_vs_5h": spike_ratio,
+        "anomaly_level": anomaly_level,
+        "anomaly_flag": anomaly_level,
+        "last_event_at": last_event.timestamp.isoformat(sep=" ", timespec="seconds") if last_event else None,
+        "seconds_since_last_event": max(0, int((current_time - last_event.timestamp).total_seconds())) if last_event else None,
+        "last_activity_seconds": max(0, int((current_time - last_event.timestamp).total_seconds())) if last_event else None,
+        "freshness_seconds": max(0, int((current_time - last_event.timestamp).total_seconds())) if last_event else None,
+        "window_utilization_percent": official_window_used_percent,
+        "official_window_used_percent": official_window_used_percent,
+        "official_window_observed_at": official_window_observed_at,
+        "projected_exhaustion_seconds": projected_exhaustion_seconds,
+        "recent_15m": recent_15m,
+        "recent_60m": recent_60m,
+    }
 
     summary: Dict[str, Any] = {
         "source": {
-            "sessions_dir": str(sessions),
-            "cwd_filter": cwd_filter,
+            "label": "本地 Codex 会话流",
+            "scope": "已启用工作区过滤" if cwd_filter else "全局工作区",
+            "cwd_filter": "enabled" if cwd_filter else None,
             "files": len(iter_session_files(sessions)),
+            "latest_event_at": last_event.timestamp.isoformat(sep=" ", timespec="seconds") if last_event else None,
+            "refresh_lag_seconds": max(0, int((current_time - last_event.timestamp).total_seconds())) if last_event else None,
+            "paths_redacted": True,
         },
         "total": total,
         "five_hour": five_hour,
@@ -714,9 +1022,10 @@ def build_usage_summary(
         "recent_calls": recent_calls,
         "series": series,
         "windows": windows,
+        "metrics": metrics,
         "rate_limits": rate_limits,
         "generated_at": current_time.isoformat(sep=" ", timespec="seconds"),
-        "note": "费用为估算值：默认使用内置 OpenAI 官方定价（openai.com/api/pricing）；也可在 ~/.codex/monitor_config.json 覆盖 pricing_per_million / model_aliases。",
+        "note": "费用为估算值：默认使用内置 OpenAI 官方定价（https://developers.openai.com/api/docs/pricing，2026-03-18 已核对）；也可在本地 monitor_config 配置中覆盖 pricing_per_million / model_aliases。路径与工作区名称默认已匿名化，便于公开展示。",
     }
 
     if include_events:
@@ -729,6 +1038,7 @@ def build_usage_summary(
             input_total = max(0, int(delta.input_tokens))
             uncached = max(0, input_total - cached)
             output = max(0, int(delta.output_tokens))
+            rates, _ = _apply_long_context_pricing(e.model, input_total, rates, e.pricing_source)
 
             cost_uncached = uncached * float(rates.input) / 1_000_000
             cost_cached = cached * float(rates.cached_input) / 1_000_000
@@ -739,7 +1049,7 @@ def build_usage_summary(
                 {
                     "timestamp": e.timestamp.isoformat(sep=" ", timespec="seconds"),
                     "model": e.model,
-                    "cwd": e.cwd,
+                    "cwd": _display_cwd(e.cwd, workspace_aliases),
                     "pricing_source": e.pricing_source,
                     "tokens": {
                         "input": input_total,
