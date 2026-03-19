@@ -1,0 +1,24 @@
+.DS_Store
+.idea/
+.vscode/
+
+__pycache__/
+.pycache/
+*.py[cod]
+*.pyd
+
+.env
+.venv/
+venv/
+env/
+
+*.log
+*.pid
+*.jsonl
+
+# Local outputs
+codex_monitor_summary.json
+monitor_config.json
+
+# Codex local state
+**/.codex/
