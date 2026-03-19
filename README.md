@@ -2,7 +2,7 @@
 
 Local monitoring center for Codex CLI sessions, rolling 5-hour quota pressure, token throughput, and estimated cost.
 
-[![Version](https://img.shields.io/badge/version-v2.4.1-61d6ff)](VERSION)
+[![Version](https://img.shields.io/badge/version-v2.4.3-61d6ff)](VERSION)
 [![License: MIT](https://img.shields.io/badge/license-MIT-7fe08a.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](#install)
 [![GitHub stars](https://img.shields.io/github/stars/SC123667/codex-monitor?style=social)](https://github.com/SC123667/codex-monitor)
@@ -15,6 +15,12 @@ Local monitoring center for Codex CLI sessions, rolling 5-hour quota pressure, t
 - 缓存命中率、输出占比、突增倍率和费用估算
 
 > 费用是估算值，不是官方账单。默认内置 OpenAI 官方定价，并支持本地覆盖定价和模型别名映射。
+
+## Preview
+
+![Codex Monitor dashboard overview](docs/images/dashboard-overview.jpg)
+
+上图展示的是当前版本的监控中心首页：左侧是 5 小时主视图与战术卡，中间聚焦吞吐和窗口负载，右侧保留官方快照、效率面和实时摘要。
 
 ## Highlights
 
